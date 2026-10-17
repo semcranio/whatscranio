@@ -49,7 +49,20 @@ Os testes cobrem compatibilidade dos agendamentos, persistência do modo automá
 open "dist/WhatsCrânio.app"
 ```
 
-O script cria um bundle em `dist/WhatsCrânio.app` e aplica uma assinatura local ad hoc. Se `Resources/AppIcon.icns` estiver presente, ele também será incluído no bundle; sem esse arquivo, o macOS usa o ícone genérico de aplicativo.
+O script cria um bundle em `dist/WhatsCrânio.app` e aplica uma assinatura local ad hoc. O ícone é gerado a partir do SVG versionado quando um `Resources/AppIcon.icns` local não está disponível.
+
+## Baixar e instalar
+
+1. Abra a seção **Releases** do repositório no GitHub.
+2. Baixe `WhatsCranio-macOS.dmg` da versão mais recente.
+3. Abra o DMG e arraste **WhatsCrânio** para **Applications**.
+4. Ejete a imagem do instalador.
+
+As versões são compiladas pelo GitHub Actions quando uma tag `v*` é publicada. O DMG inclui também um arquivo `.sha256` para conferência de integridade.
+
+### Aviso do Gatekeeper
+
+No momento, as compilações públicas usam assinatura ad hoc porque este projeto ainda não possui um certificado **Developer ID Application** nem credenciais de notarização da Apple. Na primeira abertura, clique com o botão direito no aplicativo, escolha **Abrir** e confirme. Uma instalação sem esse aviso exige assinatura Developer ID e notarização pela Apple.
 
 ## Uso básico
 

@@ -10,11 +10,12 @@ bundle="$script_dir/dist/WhatsCrânio.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$script_dir/.build/release/WhatsCranio" "$bundle/Contents/MacOS/WhatsCranio"
 cp "$script_dir/Resources/Info.plist" "$bundle/Contents/Info.plist"
-if [[ -f "$script_dir/Resources/AppIcon.icns" ]]; then
-    cp "$script_dir/Resources/AppIcon.icns" "$bundle/Contents/Resources/AppIcon.icns"
-else
-    rm -f "$bundle/Contents/Resources/AppIcon.icns"
+icon="$script_dir/Resources/AppIcon.icns"
+if [[ ! -f "$icon" ]]; then
+    "$script_dir/scripts/generate-app-icon.sh" "$script_dir/.build/AppIcon.icns" >/dev/null
+    icon="$script_dir/.build/AppIcon.icns"
 fi
+cp "$icon" "$bundle/Contents/Resources/AppIcon.icns"
 xattr -cr "$bundle"
 codesign \
     --force \

@@ -1,0 +1,42 @@
+name: Build macOS release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: swift test
+
+      - name: Package DMG
+        run: ./scripts/package-dmg.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhatsCranio-macOS
+          path: |
+            dist/WhatsCranio-macOS.dmg
+            dist/WhatsCranio-macOS.dmg.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          dist/WhatsCranio-macOS.dmg
+          dist/WhatsCranio-macOS.dmg.sha256
+          --title "WhatsCrânio $GITHUB_REF_NAME"
+          --generate-notes

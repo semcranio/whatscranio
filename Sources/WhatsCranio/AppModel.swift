@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var showingSettings = false
     @Published var showingAddAccount = false
     @Published var showingAutomationCenter = false
+    @Published var showingDonation = false
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "whatscranio.notificationsEnabled") }
     }
@@ -126,11 +127,13 @@ final class AppModel: ObservableObject {
             showingAutomationCenter = false
             showingAddAccount = false
             showingSettings = true
+            showingDonation = false
             return
         }
         showingAutomationCenter = false
         showingAddAccount = false
         showingSettings = false
+        showingDonation = false
         isLocked = true
     }
 

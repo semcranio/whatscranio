@@ -57,6 +57,11 @@ struct RootView: View {
                 .environmentObject(model)
                 .frame(width: 520, height: 620)
         }
+        .sheet(isPresented: $model.showingDonation) {
+            DonationView()
+                .environmentObject(model)
+                .frame(width: 540, height: 680)
+        }
     }
 
     private func synchronizeWebSessions() {
@@ -76,6 +81,8 @@ struct RootView: View {
                 appModel.showingAutomationCenter = true
             case .openSettings:
                 appModel.showingSettings = true
+            case .openDonation:
+                appModel.showingDonation = true
             case .lock:
                 appModel.lockNow()
             }

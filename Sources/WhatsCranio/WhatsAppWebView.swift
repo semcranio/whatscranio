@@ -7,6 +7,7 @@ enum WebAppAction {
     case addAccount
     case openAutomation
     case openSettings
+    case openDonation
     case lock
 }
 
@@ -23,6 +24,7 @@ final class WebActionBridge: NSObject, WKScriptMessageHandler {
         case "addAccount": handler?(.addAccount)
         case "openAutomation": handler?(.openAutomation)
         case "openSettings": handler?(.openSettings)
+        case "openDonation": handler?(.openDonation)
         case "lock": handler?(.lock)
         default: break
         }
@@ -175,6 +177,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             add: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
             automation: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4.5 13h6L9.8 22 19.5 10h-6L13 2Z"/></svg>`,
             settings: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.12.6.64 1.02 1.25 1H21a2 2 0 1 1 0 4h-.35c-.61 0-1.13.42-1.25 1Z"/></svg>`,
+            donation: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/><path d="M8.5 11.5h7M12 8v7"/></svg>`,
             lock: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
           };
 
@@ -289,6 +292,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
           host.appendChild(createButton({ title: "Adicionar conta", icon: icons.add, action: "addAccount" }));
           host.appendChild(createButton({ title: "Mensagens rápidas e agendamentos", icon: icons.automation, action: "openAutomation" }));
           host.appendChild(createButton({ title: "Preferências", icon: icons.settings, action: "openSettings" }));
+          host.appendChild(createButton({ title: "Apoiar Tales Lima", icon: icons.donation, action: "openDonation" }));
           host.appendChild(createButton({ title: "Bloquear WhatsCrânio", icon: icons.lock, action: "lock" }));
             }
 

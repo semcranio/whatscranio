@@ -20,6 +20,7 @@ O WhatsCrânio mantém cada conta em uma sessão WebKit persistente e isolada. A
 - bloqueio imediato pela barra lateral;
 - bloqueio automático entre 1 e 120 minutos de inatividade;
 - senha de bloqueio protegida pelo Chaveiro do macOS;
+- página de apoio ao desenvolvedor com QR Code Pix e código copia e cola;
 - interface compacta e integrada ao WhatsApp Web.
 
 ## Requisitos
@@ -40,7 +41,7 @@ swift run WhatsCranio
 swift test
 ```
 
-Os testes cobrem compatibilidade dos agendamentos, persistência do modo automático, validação da senha, troca e remoção de credenciais, rejeição de senha incorreta e o tempo do bloqueio automático.
+Os testes cobrem compatibilidade dos agendamentos, persistência do modo automático, validação da senha, troca e remoção de credenciais, rejeição de senha incorreta, tempo do bloqueio automático e leitura do QR Code Pix.
 
 ## Gerar o aplicativo
 
@@ -70,7 +71,8 @@ No momento, as compilações públicas usam assinatura ad hoc porque este projet
 2. Use o botão **+** da barra integrada para adicionar outras contas.
 3. Use o raio para abrir mensagens rápidas, agendamentos e filas.
 4. Use a engrenagem para abrir as preferências.
-5. Configure uma senha em **Preferências → Bloqueio** antes de usar o cadeado.
+5. Use o coração para abrir a página de apoio ao desenvolvedor.
+6. Configure uma senha em **Preferências → Bloqueio** antes de usar o cadeado.
 
 ## Agendamentos
 
@@ -105,6 +107,7 @@ Sources/WhatsCranio/
 ├── AppModel.swift         # Estado, persistência e automações
 ├── AutomationViews.swift  # Mensagens rápidas, agenda e filas
 ├── LocalStore.swift       # Armazenamento local dos modelos
+├── PixDonation.swift      # Página de apoio e payload Pix
 ├── Views.swift            # Interface SwiftUI
 ├── WebModels.swift        # Modelos de domínio
 ├── WhatsAppWebView.swift  # Integração com WKWebView

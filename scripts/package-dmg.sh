@@ -20,5 +20,5 @@ hdiutil create \
     -format UDZO \
     "$dmg" >/dev/null
 
-shasum -a 256 "$dmg" > "$dmg.sha256"
+(cd "$project_dir/dist" && shasum -a 256 "${dmg:t}") > "$dmg.sha256"
 echo "$dmg"

@@ -20,6 +20,11 @@ final class AppModel: ObservableObject {
     @Published var showingAddAccount = false
     @Published var showingAutomationCenter = false
     @Published var showingDonation = false
+    @Published var pendingWhatsAppLink: WhatsAppDeepLink?
+    @Published var deepLinkErrorMessage: String?
+    @Published private(set) var preferredDeepLinkAccountID: UUID?
+    @Published private(set) var isDefaultWhatsAppLinkHandler = false
+    @Published var defaultLinkHandlerFeedback: String?
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "whatscranio.notificationsEnabled") }
     }
@@ -32,6 +37,7 @@ final class AppModel: ObservableObject {
     private let lockSecurity: AppLockSecurity
     private var lastUserActivity = Date()
     private var activityMonitor: Any?
+    private var deferredWhatsAppLink: WhatsAppDeepLink?
 
     init(lockSecurity: AppLockSecurity = AppLockSecurity()) {
         self.lockSecurity = lockSecurity
@@ -55,6 +61,19 @@ final class AppModel: ObservableObject {
         } else {
             selectedAccountID = resolvedAccounts[0].id
         }
+        let storedDeepLinkAccountID = UserDefaults.standard
+            .string(forKey: "whatscranio.preferredDeepLinkAccountID")
+            .flatMap(UUID.init(uuidString:))
+        if let storedDeepLinkAccountID,
+           resolvedAccounts.contains(where: { $0.id == storedDeepLinkAccountID }) {
+            preferredDeepLinkAccountID = storedDeepLinkAccountID
+        } else {
+            preferredDeepLinkAccountID = nil
+            UserDefaults.standard.removeObject(forKey: "whatscranio.preferredDeepLinkAccountID")
+        }
+        pendingWhatsAppLink = nil
+        deepLinkErrorMessage = nil
+        defaultLinkHandlerFeedback = nil
 
         let storedTemplates = LocalStore.loadTemplates()
         templates = storedTemplates.isEmpty ? [
@@ -98,6 +117,79 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func startDeepLinkHandling() {
+        WhatsAppDeepLinkRouter.shared.install { [weak self] url in
+            self?.receiveWhatsAppLink(url)
+        }
+        refreshDefaultWhatsAppLinkHandler()
+    }
+
+    func receiveWhatsAppLink(_ url: URL) {
+        guard let link = WhatsAppDeepLink(url: url) else {
+            deepLinkErrorMessage = "O link recebido não é um endereço válido para iniciar uma conversa no WhatsApp."
+            bringMainWindowForward()
+            return
+        }
+
+        bringMainWindowForward()
+        if isLocked {
+            deferredWhatsAppLink = link
+            return
+        }
+        routeWhatsAppLink(link)
+    }
+
+    func openPendingWhatsAppLink(in accountID: UUID, rememberAccount: Bool) {
+        guard let link = pendingWhatsAppLink,
+              let account = accounts.first(where: { $0.id == accountID })
+        else { return }
+
+        if rememberAccount {
+            preferredDeepLinkAccountID = account.id
+            UserDefaults.standard.set(account.id.uuidString, forKey: "whatscranio.preferredDeepLinkAccountID")
+        }
+        pendingWhatsAppLink = nil
+        openWhatsAppLink(link, in: account)
+    }
+
+    func cancelPendingWhatsAppLink() {
+        pendingWhatsAppLink = nil
+    }
+
+    func clearPreferredDeepLinkAccount() {
+        preferredDeepLinkAccountID = nil
+        UserDefaults.standard.removeObject(forKey: "whatscranio.preferredDeepLinkAccountID")
+    }
+
+    func refreshDefaultWhatsAppLinkHandler() {
+        guard let probeURL = URL(string: "whatsapp://send?phone=1") else { return }
+        let handlerURL = NSWorkspace.shared.urlForApplication(toOpen: probeURL)
+        isDefaultWhatsAppLinkHandler = handlerURL?.resolvingSymlinksInPath().standardizedFileURL
+            == Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    func makeDefaultWhatsAppLinkHandler() {
+        NSWorkspace.shared.setDefaultApplication(
+            at: Bundle.main.bundleURL,
+            toOpenURLsWithScheme: "whatsapp"
+        ) { [weak self] error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let error {
+                    self.defaultLinkHandlerFeedback = "Não foi possível alterar o aplicativo padrão: \(error.localizedDescription)"
+                } else {
+                    self.defaultLinkHandlerFeedback = "O WhatsCrânio agora é o aplicativo padrão para links do WhatsApp."
+                }
+                self.refreshDefaultWhatsAppLinkHandler()
+            }
+        }
+    }
+
+    var preferredDeepLinkAccount: WebAccount? {
+        guard let preferredDeepLinkAccountID else { return nil }
+        return accounts.first(where: { $0.id == preferredDeepLinkAccountID })
+    }
+
     func stopActivityMonitoring() {
         guard let activityMonitor else { return }
         NSEvent.removeMonitor(activityMonitor)
@@ -134,6 +226,10 @@ final class AppModel: ObservableObject {
         showingAddAccount = false
         showingSettings = false
         showingDonation = false
+        if let pendingWhatsAppLink {
+            deferredWhatsAppLink = pendingWhatsAppLink
+            self.pendingWhatsAppLink = nil
+        }
         isLocked = true
     }
 
@@ -141,6 +237,10 @@ final class AppModel: ObservableObject {
         guard lockSecurity.verify(password) else { return false }
         isLocked = false
         recordUserActivity()
+        if let deferredWhatsAppLink {
+            self.deferredWhatsAppLink = nil
+            routeWhatsAppLink(deferredWhatsAppLink)
+        }
         return true
     }
 
@@ -198,7 +298,54 @@ final class AppModel: ObservableObject {
         LocalStore.saveAccounts(accounts)
         LocalStore.saveSchedules(scheduledMessages)
         WebSessionPool.shared.remove(account: account)
+        if preferredDeepLinkAccountID == account.id {
+            clearPreferredDeepLinkAccount()
+        }
         selectedAccountID = accounts[0].id
+    }
+
+    private func routeWhatsAppLink(_ link: WhatsAppDeepLink) {
+        let wasShowingSheet = showingAutomationCenter || showingAddAccount || showingSettings || showingDonation
+        showingAutomationCenter = false
+        showingAddAccount = false
+        showingSettings = false
+        showingDonation = false
+
+        switch WhatsAppDeepLinkRouting.route(
+            accounts: accounts,
+            preferredAccountID: preferredDeepLinkAccountID
+        ) {
+        case .unavailable:
+            deepLinkErrorMessage = "Nenhuma conta do WhatsApp está configurada."
+        case .open(let accountID):
+            guard let account = accounts.first(where: { $0.id == accountID }) else { return }
+            openWhatsAppLink(link, in: account)
+        case .chooseAccount:
+            if wasShowingSheet {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard let self, !self.isLocked else { return }
+                    self.pendingWhatsAppLink = link
+                }
+            } else {
+                pendingWhatsAppLink = link
+            }
+        }
+    }
+
+    private func openWhatsAppLink(_ link: WhatsAppDeepLink, in account: WebAccount) {
+        selectedAccountID = account.id
+        let session = WebSessionPool.shared.session(for: account)
+        session.openWhatsAppLink(link)
+        bringMainWindowForward()
+    }
+
+    private func bringMainWindowForward() {
+        NSApp.activate(ignoringOtherApps: true)
+        let mainWindow = NSApp.windows.first(where: { window in
+            window.canBecomeKey && !(window is NSPanel) && window.title.contains("WhatsCrânio")
+        }) ?? NSApp.windows.first(where: { $0.canBecomeKey && !($0 is NSPanel) })
+        mainWindow?.makeKeyAndOrderFront(nil)
     }
 
     func saveTemplate(_ template: QuickMessageTemplate) {

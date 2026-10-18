@@ -35,6 +35,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.2), value: model.isLocked)
         .onAppear {
             model.startActivityMonitoring()
+            model.startDeepLinkHandling()
             model.recordUserActivity()
             synchronizeWebSessions()
             model.refreshDueSchedules()
@@ -62,6 +63,21 @@ struct RootView: View {
                 .environmentObject(model)
                 .frame(width: 540, height: 680)
         }
+        .sheet(item: $model.pendingWhatsAppLink) { link in
+            WhatsAppLinkAccountPicker(link: link)
+                .environmentObject(model)
+        }
+        .alert(
+            "Não foi possível abrir o link",
+            isPresented: Binding(
+                get: { model.deepLinkErrorMessage != nil },
+                set: { if !$0 { model.deepLinkErrorMessage = nil } }
+            )
+        ) {
+            Button("OK") { model.deepLinkErrorMessage = nil }
+        } message: {
+            Text(model.deepLinkErrorMessage ?? "")
+        }
     }
 
     private func synchronizeWebSessions() {
@@ -88,6 +104,82 @@ struct RootView: View {
             }
         }
         WebSessionPool.shared.prewarm(accounts: model.accounts)
+    }
+}
+
+struct WhatsAppLinkAccountPicker: View {
+    @EnvironmentObject private var model: AppModel
+    let link: WhatsAppDeepLink
+    @State private var rememberAccount = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: "message.fill")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Abrir conversa no WhatsApp")
+                        .font(.title2.bold())
+                    Text("Escolha em qual conta este link será aberto.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                if let phone = link.phone {
+                    Label(phone, systemImage: "phone")
+                        .font(.headline)
+                        .textSelection(.enabled)
+                }
+                if let text = link.text, !text.isEmpty {
+                    Text(text)
+                        .font(.callout)
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
+                }
+            }
+
+            VStack(spacing: 8) {
+                ForEach(model.accounts) { account in
+                    Button {
+                        model.openPendingWhatsAppLink(
+                            in: account.id,
+                            rememberAccount: rememberAccount
+                        )
+                    } label: {
+                        HStack(spacing: 12) {
+                            Avatar(initials: initials(for: account), tint: account.tint, size: 34)
+                            Text(account.name)
+                                .font(.headline)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                    .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 11))
+                }
+            }
+
+            Toggle("Usar sempre a conta escolhida para links do WhatsApp", isOn: $rememberAccount)
+
+            HStack {
+                Spacer()
+                Button("Cancelar") { model.cancelPendingWhatsAppLink() }
+            }
+        }
+        .padding(22)
+        .frame(width: 480)
+        .interactiveDismissDisabled()
+    }
+
+    private func initials(for account: WebAccount) -> String {
+        account.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
     }
 }
 
@@ -329,6 +421,48 @@ struct SettingsView: View {
                 Button("Adicionar conta") {
                     model.showingSettings = false
                     model.showingAddAccount = true
+                }
+            }
+            Section("Links do WhatsApp") {
+                HStack {
+                    Label(
+                        model.isDefaultWhatsAppLinkHandler
+                            ? "WhatsCrânio é o aplicativo padrão"
+                            : "Outro aplicativo abre os links atualmente",
+                        systemImage: model.isDefaultWhatsAppLinkHandler
+                            ? "checkmark.circle.fill"
+                            : "link.badge.plus"
+                    )
+                    .foregroundStyle(model.isDefaultWhatsAppLinkHandler ? .green : .secondary)
+                    Spacer()
+                    if !model.isDefaultWhatsAppLinkHandler {
+                        Button("Usar WhatsCrânio") {
+                            model.makeDefaultWhatsAppLinkHandler()
+                        }
+                    }
+                }
+                if let account = model.preferredDeepLinkAccount {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Conta usada automaticamente")
+                                .font(.headline)
+                            Text(account.name)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Perguntar sempre") {
+                            model.clearPreferredDeepLinkAccount()
+                        }
+                    }
+                } else {
+                    Text("Quando um link do WhatsApp for aberto e houver mais de uma conta, o WhatsCrânio perguntará qual conta deve receber a conversa.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if let feedback = model.defaultLinkHandlerFeedback {
+                    Text(feedback)
+                        .font(.callout)
+                        .foregroundStyle(model.isDefaultWhatsAppLinkHandler ? .green : .red)
                 }
             }
             Section("Notificações") {

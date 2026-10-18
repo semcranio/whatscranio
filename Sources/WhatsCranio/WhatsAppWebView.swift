@@ -55,6 +55,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var activeQueueRunID: UUID?
     private var activeQueueCompletion: ((MessageQueueResult) -> Void)?
     private var integratedNavigationScript: String?
+    private var activeDeepLinkID: UUID?
 
     private static var safariApplicationName: String {
         let safariVersion = Bundle(path: "/Applications/Safari.app")?
@@ -125,6 +126,173 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     func loadWhatsAppIfNeeded() {
         guard webView.url == nil, let url = URL(string: "https://web.whatsapp.com") else { return }
         webView.load(URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 60))
+    }
+
+    func openWhatsAppLink(_ link: WhatsAppDeepLink) {
+        activeDeepLinkID = link.id
+        guard let phone = link.phone else {
+            prepareDeepLinkText(link)
+            return
+        }
+        captureActiveChat { [weak self] label in
+            guard let self, self.activeDeepLinkID == link.id else { return }
+            if label.map({ WhatsAppPhoneNumber.matches(phone, $0) }) == true {
+                self.prepareDeepLinkText(link)
+            } else {
+                self.performSoftDeepLinkNavigation(link) { [weak self] in
+                    self?.waitForSoftDeepLinkTarget(link, phone: phone)
+                }
+            }
+        }
+    }
+
+    private func performSoftDeepLinkNavigation(_ link: WhatsAppDeepLink, completion: @escaping () -> Void) {
+        guard webView.url?.host == "web.whatsapp.com",
+              let urlData = try? JSONSerialization.data(withJSONObject: link.webURL.absoluteString, options: .fragmentsAllowed),
+              let urlLiteral = String(data: urlData, encoding: .utf8)
+        else {
+            completion()
+            return
+        }
+
+        let script = """
+        (() => {
+          const destination = new URL(\(urlLiteral));
+          const route = destination.pathname + destination.search;
+          history.pushState({ whatscranioDeepLink: true }, "", route);
+          window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+          return location.href;
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { _, _ in
+            Task { @MainActor in completion() }
+        }
+    }
+
+    private func waitForSoftDeepLinkTarget(_ link: WhatsAppDeepLink, phone: String, attempt: Int = 0) {
+        guard activeDeepLinkID == link.id else { return }
+        captureActiveChat { [weak self] label in
+            guard let self, self.activeDeepLinkID == link.id else { return }
+            if label.map({ WhatsAppPhoneNumber.matches(phone, $0) }) == true {
+                self.prepareDeepLinkText(link)
+            } else if attempt < 20 {
+                self.clickVisibleChatRow(matching: phone) { [weak self] in
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(300))
+                        self?.waitForSoftDeepLinkTarget(link, phone: phone, attempt: attempt + 1)
+                    }
+                }
+            } else {
+                self.openDeepLinkWithReloadFallback(link, phone: phone)
+            }
+        }
+    }
+
+    private func clickVisibleChatRow(matching phone: String, completion: @escaping () -> Void) {
+        guard let phoneData = try? JSONSerialization.data(withJSONObject: phone, options: .fragmentsAllowed),
+              let phoneLiteral = String(data: phoneData, encoding: .utf8)
+        else {
+            completion()
+            return
+        }
+        let script = """
+        (() => {
+          const target = \(phoneLiteral);
+          const clean = (value) => (value || "").replace(/\\s+/g, " ").trim();
+          const variants = (value) => {
+            const digits = (value || "").replace(/\\D/g, "");
+            const result = new Set(digits ? [digits] : []);
+            if (digits.startsWith("55") && digits.length === 13 && digits[4] === "9") {
+              result.add(digits.slice(0, 4) + digits.slice(5));
+            } else if (digits.startsWith("55") && digits.length === 12) {
+              result.add(digits.slice(0, 4) + "9" + digits.slice(4));
+            }
+            return Array.from(result);
+          };
+          const matches = (value) => variants(value).some((candidate) =>
+            candidate.length >= 8 && variants(target).some((expected) =>
+              expected.length >= 8 && (candidate.endsWith(expected) || expected.endsWith(candidate))
+            )
+          );
+          const visible = (element) => {
+            const rect = element?.getBoundingClientRect?.();
+            const style = element ? getComputedStyle(element) : null;
+            return !!rect && rect.width > 0 && rect.height > 0 && style?.display !== "none" && style?.visibility !== "hidden";
+          };
+          const pane = document.querySelector("#pane-side");
+          if (!pane) return null;
+          const rows = Array.from(pane.querySelectorAll(
+            '[role="listitem"], [role="row"], [data-testid="cell-frame-container"]'
+          )).filter(visible);
+          const row = rows.find((element) => {
+            const values = [element.innerText];
+            for (const child of [element, ...element.querySelectorAll('[title], [aria-label]')]) {
+              values.push(child.getAttribute?.("title"), child.getAttribute?.("aria-label"));
+            }
+            return values.filter(Boolean).map(clean).some(matches);
+          });
+          if (!row) return null;
+          const clickable = row.closest('[role="listitem"], [role="row"]') || row;
+          const rect = clickable.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + Math.min(rect.height / 2, 36) };
+        })();
+        """
+        let webSession = self
+        webView.evaluateJavaScript(script) { result, _ in
+            Task { @MainActor in
+                if let point = result as? [String: Any],
+                   let x = point["x"] as? Double,
+                   let y = point["y"] as? Double {
+                    webSession.performTrustedWebClick(x: x, y: y)
+                }
+                completion()
+            }
+        }
+    }
+
+    private func openDeepLinkWithReloadFallback(_ link: WhatsAppDeepLink, phone: String) {
+        guard activeDeepLinkID == link.id else { return }
+        webView.load(URLRequest(
+            url: link.webURL,
+            cachePolicy: .useProtocolCachePolicy,
+            timeoutInterval: 60
+        ))
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard let self, self.activeDeepLinkID == link.id else { return }
+            self.waitForReloadedDeepLinkTarget(link, phone: phone)
+        }
+    }
+
+    private func waitForReloadedDeepLinkTarget(_ link: WhatsAppDeepLink, phone: String, attempt: Int = 0) {
+        guard activeDeepLinkID == link.id else { return }
+        captureActiveChat { [weak self] label in
+            guard let self, self.activeDeepLinkID == link.id else { return }
+            if label.map({ WhatsAppPhoneNumber.matches(phone, $0) }) == true {
+                self.prepareDeepLinkText(link)
+            } else if attempt < 40 {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    self?.waitForReloadedDeepLinkTarget(link, phone: phone, attempt: attempt + 1)
+                }
+            } else {
+                self.activeDeepLinkID = nil
+            }
+        }
+    }
+
+    private func prepareDeepLinkText(_ link: WhatsAppDeepLink) {
+        guard activeDeepLinkID == link.id else { return }
+        guard let text = link.text, !text.isEmpty else {
+            activeDeepLinkID = nil
+            return
+        }
+        queueAttachments(paths: [], caption: text)
+        runPreparedMessageMacro { [weak self] _ in
+            guard self?.activeDeepLinkID == link.id else { return }
+            self?.activeDeepLinkID = nil
+        }
     }
 
     func updateIntegratedNavigation(accounts: [WebAccount], selectedAccountID: UUID) {
@@ -447,10 +615,19 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             completion(false)
             return
         }
-        activateChat(named: cleanTarget, attempt: 0, completion: completion)
+        activateChat(named: cleanTarget, attempt: 0, shouldContinue: nil, completion: completion)
     }
 
-    private func activateChat(named target: String, attempt: Int, completion: @escaping (Bool) -> Void) {
+    private func activateChat(
+        named target: String,
+        attempt: Int,
+        shouldContinue: (() -> Bool)?,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard shouldContinue?() ?? true else {
+            completion(false)
+            return
+        }
         guard attempt < 60,
               webView.url?.scheme == "https",
               webView.url?.host == "web.whatsapp.com",
@@ -466,13 +643,24 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
           const target = \(targetLiteral);
           const clean = (value) => (value || "").replace(/\\s+/g, " ").trim();
           const normalized = (value) => clean(value).normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLocaleLowerCase();
+          const digitVariants = (value) => {
+            const digits = (value || "").replace(/\\D/g, "");
+            const variants = new Set(digits ? [digits] : []);
+            if (digits.startsWith("55") && digits.length === 13 && digits[4] === "9") {
+              variants.add(digits.slice(0, 4) + digits.slice(5));
+            } else if (digits.startsWith("55") && digits.length === 12) {
+              variants.add(digits.slice(0, 4) + "9" + digits.slice(4));
+            }
+            return Array.from(variants);
+          };
           const targetDigits = target.replace(/\\D/g, "");
           const matches = (value) => {
             const candidate = clean(value);
             if (!candidate) return false;
             if (targetDigits.length >= 8) {
-              const digits = candidate.replace(/\\D/g, "");
-              return digits.length >= 8 && (digits.endsWith(targetDigits) || targetDigits.endsWith(digits));
+              return digitVariants(candidate).some((left) => digitVariants(target).some((right) =>
+                left.length >= 8 && right.length >= 8 && (left.endsWith(right) || right.endsWith(left))
+              ));
             }
             return normalized(candidate) === normalized(target);
           };
@@ -562,7 +750,12 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
                     break
                 }
                 try? await Task.sleep(for: .milliseconds(attempt < 12 ? 300 : 500))
-                webSession.activateChat(named: target, attempt: attempt + 1, completion: completion)
+                webSession.activateChat(
+                    named: target,
+                    attempt: attempt + 1,
+                    shouldContinue: shouldContinue,
+                    completion: completion
+                )
             }
         }
     }

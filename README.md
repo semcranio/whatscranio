@@ -10,6 +10,7 @@ O WhatsCrânio mantém cada conta em uma sessão WebKit persistente e isolada. A
 
 - múltiplas contas do WhatsApp Web no mesmo aplicativo;
 - sessões, cookies e armazenamento separados por conta;
+- abertura de links `whatsapp://` com seleção da conta de destino;
 - mensagens rápidas organizadas por categorias e pesquisa;
 - anexos de imagem ou documento com legenda automática;
 - agendamento com confirmação manual ou envio automático;
@@ -41,7 +42,7 @@ swift run WhatsCranio
 swift test
 ```
 
-Os testes cobrem compatibilidade dos agendamentos, persistência do modo automático, validação da senha, troca e remoção de credenciais, rejeição de senha incorreta, tempo do bloqueio automático e leitura do QR Code Pix.
+Os testes cobrem compatibilidade dos agendamentos, persistência do modo automático, validação da senha, troca e remoção de credenciais, rejeição de senha incorreta, tempo do bloqueio automático, leitura do QR Code Pix e conversão segura de links `whatsapp://`, `api.whatsapp.com` e `wa.me`.
 
 ## Gerar o aplicativo
 
@@ -73,6 +74,12 @@ No momento, as compilações públicas usam assinatura ad hoc porque este projet
 4. Use a engrenagem para abrir as preferências.
 5. Use o coração para abrir a página de apoio ao desenvolvedor.
 6. Configure uma senha em **Preferências → Bloqueio** antes de usar o cadeado.
+
+## Links do WhatsApp
+
+Ao abrir um link do WhatsApp no navegador, o macOS pode encaminhá-lo ao WhatsCrânio por meio do esquema `whatsapp://`. Se houver mais de uma conta, o aplicativo mostra o telefone, a mensagem do link e solicita a conta de destino antes de abrir a conversa.
+
+É possível memorizar a conta escolhida. A escolha pode ser removida em **Preferências → Links do WhatsApp → Perguntar sempre**. A preferência usa o identificador permanente da conta, portanto não depende da posição dela na lista.
 
 ## Agendamentos
 

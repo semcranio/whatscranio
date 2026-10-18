@@ -502,6 +502,10 @@ struct SettingsView: View {
             Section("Notificações") {
                 Text("O WhatsCrânio observa novas mensagens nas contas carregadas e usa as notificações nativas do macOS. Ao clicar em um alerta, a conta correspondente é aberta. O contador também aparece na barra de menus e no ícone do Dock.")
                     .font(.callout).foregroundStyle(.secondary)
+                Button("Testar notificação") {
+                    model.sendTestMessageNotification()
+                }
+                .disabled(!model.messageNotificationsEnabled)
             }
             Section("Privacidade") {
                 Text("Cada conta usa armazenamento WebKit persistente separado. O app mantém todas as contas carregadas enquanto está aberto e aguarda a gravação do WebKit ao encerrar.")

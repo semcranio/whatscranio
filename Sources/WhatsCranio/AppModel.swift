@@ -136,6 +136,11 @@ final class AppModel: ObservableObject {
         )
     }
 
+    func sendTestMessageNotification() {
+        guard let account = accounts.first(where: { $0.id == selectedAccountID }) ?? accounts.first else { return }
+        DesktopNotificationService.deliverTest(account: account)
+    }
+
     func openAccountFromNotification(_ accountID: UUID) {
         guard accounts.contains(where: { $0.id == accountID }) else { return }
         selectedAccountID = accountID

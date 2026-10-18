@@ -480,9 +480,10 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             button.style.cssText = [
               "width:40px", "height:40px", "min-height:40px", "border:0", "border-radius:12px",
               "display:flex", "align-items:center", "justify-content:center", "cursor:pointer",
-              "font:600 13px -apple-system,BlinkMacSystemFont,sans-serif", "color:white",
+              "font:600 13px -apple-system,BlinkMacSystemFont,sans-serif",
+              tint ? "color:white" : "color:var(--panel-header-icon,var(--icon,#54656f))",
               "position:relative", "overflow:visible", "flex:0 0 auto",
-              `background:${tint || "rgba(255,255,255,.10)"}`,
+              `background:${tint ? `#${tint.replace(/^#/, "")}` : "transparent"}`,
               selected ? "box-shadow:0 0 0 3px #21c063" : "box-shadow:none"
             ].join(";");
 
@@ -544,7 +545,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             if (!nativeRail && !fallbackRail) {
               fallbackRail = document.createElement("div");
               fallbackRail.id = "whatscranio-fallback-rail";
-              fallbackRail.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:64px;z-index:2147483646;background:#202c33;display:flex;flex-direction:column;align-items:center;overflow-y:auto;overflow-x:hidden";
+              fallbackRail.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:64px;z-index:2147483646;background:var(--panel-header-background,var(--background-default,#f0f2f5));display:flex;flex-direction:column;align-items:center;overflow-y:auto;overflow-x:hidden";
               document.body.appendChild(fallbackRail);
             }
             const rail = nativeRail || fallbackRail;
@@ -583,7 +584,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             }
 
             if (nativeRail) {
-              host.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 4px 9px;border:1px solid rgba(128,128,128,.22);border-radius:16px;width:48px;position:fixed;z-index:2147483646;background:#202c33;box-sizing:border-box";
+              host.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 4px 9px;border:0;width:48px;position:fixed;z-index:2147483646;background:transparent;box-sizing:border-box";
               const chatButton = findChatButton();
               const chatRect = chatButton?.getBoundingClientRect();
               if (chatRect) host.style.left = `${chatRect.left + chatRect.width / 2 - 24}px`;
@@ -610,7 +611,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
               host.style.top = `${top}px`;
               nativeRail.style.overflow = "visible";
             } else {
-              host.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 4px 9px;border-bottom:1px solid rgba(128,128,128,.22);width:64px;position:relative;box-sizing:border-box";
+              host.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 4px 9px;border:0;width:64px;position:relative;background:transparent;box-sizing:border-box";
             }
             return true;
           };

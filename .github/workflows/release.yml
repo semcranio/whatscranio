@@ -10,7 +10,17 @@ permissions:
   contents: write
 
 jobs:
+  test-intel:
+    runs-on: macos-15-intel
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Run tests on Intel
+        run: swift test
+
   build:
+    needs: test-intel
     runs-on: macos-15
     steps:
       - name: Check out source
@@ -21,6 +31,9 @@ jobs:
 
       - name: Package DMG
         run: ./scripts/package-dmg.sh
+
+      - name: Verify Universal 2 application
+        run: lipo "dist/WhatsCrânio.app/Contents/MacOS/WhatsCranio" -verify_arch arm64 x86_64
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

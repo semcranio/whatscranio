@@ -29,7 +29,7 @@ O WhatsCrânio mantém cada conta em uma sessão WebKit persistente e isolada. A
 
 ## Requisitos
 
-- macOS 14 ou posterior;
+- macOS 14 ou posterior, em Macs Intel ou Apple Silicon;
 - Xcode Command Line Tools com Swift 6;
 - uma conta válida do WhatsApp para cada sessão conectada.
 
@@ -54,7 +54,7 @@ Os testes cobrem compatibilidade dos agendamentos, persistência do modo automá
 open "dist/WhatsCrânio.app"
 ```
 
-O script cria um bundle em `dist/WhatsCrânio.app` e aplica uma assinatura local ad hoc. O ícone é gerado a partir do SVG versionado quando um `Resources/AppIcon.icns` local não está disponível.
+O script cria um bundle Universal 2 (`x86_64` e `arm64`) em `dist/WhatsCrânio.app` e aplica uma assinatura local ad hoc. O ícone é gerado a partir do SVG versionado quando um `Resources/AppIcon.icns` local não está disponível.
 
 ## Baixar e instalar
 

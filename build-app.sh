@@ -4,11 +4,12 @@ set -euo pipefail
 script_dir="${0:A:h}"
 cd "$script_dir"
 
-swift build -c release
+swift build -c release --arch arm64 --arch x86_64
+release_bin_dir="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
 
 bundle="$script_dir/dist/WhatsCrânio.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
-cp "$script_dir/.build/release/WhatsCranio" "$bundle/Contents/MacOS/WhatsCranio"
+cp "$release_bin_dir/WhatsCranio" "$bundle/Contents/MacOS/WhatsCranio"
 cp "$script_dir/Resources/Info.plist" "$bundle/Contents/Info.plist"
 icon="$script_dir/Resources/AppIcon.icns"
 if [[ ! -f "$icon" ]]; then

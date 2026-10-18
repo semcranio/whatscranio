@@ -28,12 +28,21 @@ final class AppModel: ObservableObject {
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "whatscranio.notificationsEnabled") }
     }
+    @Published var messageNotificationsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(messageNotificationsEnabled, forKey: "whatscranio.messageNotificationsEnabled")
+            if messageNotificationsEnabled {
+                DesktopNotificationService.requestAuthorization()
+            }
+        }
+    }
     @Published var accounts: [WebAccount]
     @Published var templates: [QuickMessageTemplate]
     @Published var scheduledMessages: [ScheduledMessage]
     @Published var macroQueues: [MessageMacroQueue]
     @Published var activeMacroQueueRun: MacroQueueRun?
     @Published private(set) var activeScheduledSendID: UUID?
+    @Published private(set) var unreadMessagesByAccount: [UUID: Int] = [:]
     private let lockSecurity: AppLockSecurity
     private var lastUserActivity = Date()
     private var activityMonitor: Any?
@@ -49,6 +58,7 @@ final class AppModel: ObservableObject {
             autoLockMinutes = 5
         }
         notificationsEnabled = UserDefaults.standard.object(forKey: "whatscranio.notificationsEnabled") as? Bool ?? true
+        messageNotificationsEnabled = UserDefaults.standard.object(forKey: "whatscranio.messageNotificationsEnabled") as? Bool ?? true
         let storedAccounts = LocalStore.loadAccounts()
         let resolvedAccounts = storedAccounts.isEmpty ? [
             WebAccount(name: "Conta principal", tint: "1DAA82"),
@@ -94,6 +104,47 @@ final class AppModel: ObservableObject {
         LocalStore.saveTemplates(templates)
         if recoveredInterruptedSend { LocalStore.saveSchedules(scheduledMessages) }
         refreshDueSchedules(executeAutomatic: false)
+    }
+
+    var totalUnreadMessages: Int {
+        unreadMessagesByAccount.values.reduce(0, +)
+    }
+
+    func unreadMessages(for accountID: UUID) -> Int {
+        unreadMessagesByAccount[accountID, default: 0]
+    }
+
+    func updateUnreadMessages(_ count: Int, for accountID: UUID) {
+        guard accounts.contains(where: { $0.id == accountID }) else { return }
+        unreadMessagesByAccount[accountID] = max(0, count)
+        refreshUnreadBadge()
+    }
+
+    func handleIncomingMessage(
+        accountID: UUID,
+        sender: String,
+        preview: String,
+        conversationID: String
+    ) {
+        guard messageNotificationsEnabled,
+              let account = accounts.first(where: { $0.id == accountID }) else { return }
+        DesktopNotificationService.deliver(
+            account: account,
+            sender: sender,
+            preview: preview,
+            conversationID: conversationID
+        )
+    }
+
+    func openAccountFromNotification(_ accountID: UUID) {
+        guard accounts.contains(where: { $0.id == accountID }) else { return }
+        selectedAccountID = accountID
+        showingAutomationCenter = false
+        showingAddAccount = false
+        showingSettings = false
+        showingDonation = false
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first(where: { $0.title == "WhatsCrânio" })?.makeKeyAndOrderFront(nil)
     }
 
     func startActivityMonitoring() {
@@ -291,9 +342,32 @@ final class AppModel: ObservableObject {
         selectedAccountID = account.id
     }
 
+    @discardableResult
+    func updateAccount(_ account: WebAccount, name: String, tint: String) -> Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTint = tint.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            .uppercased()
+        guard !cleanName.isEmpty,
+              cleanTint.count == 6,
+              cleanTint.unicodeScalars.allSatisfy(CharacterSet(charactersIn: "0123456789ABCDEF").contains),
+              let index = accounts.firstIndex(where: { $0.id == account.id }) else {
+            return false
+        }
+
+        var updatedAccount = accounts[index]
+        updatedAccount.name = cleanName
+        updatedAccount.tint = cleanTint
+        accounts[index] = updatedAccount
+        LocalStore.saveAccounts(accounts)
+        return true
+    }
+
     func removeAccount(_ account: WebAccount) {
         guard accounts.count > 1 else { return }
         accounts.removeAll { $0.id == account.id }
+        unreadMessagesByAccount[account.id] = nil
+        refreshUnreadBadge()
         scheduledMessages.removeAll { $0.accountID == account.id }
         LocalStore.saveAccounts(accounts)
         LocalStore.saveSchedules(scheduledMessages)
@@ -302,6 +376,10 @@ final class AppModel: ObservableObject {
             clearPreferredDeepLinkAccount()
         }
         selectedAccountID = accounts[0].id
+    }
+
+    private func refreshUnreadBadge() {
+        NSApp.dockTile.badgeLabel = totalUnreadMessages > 0 ? String(totalUnreadMessages) : nil
     }
 
     private func routeWhatsAppLink(_ link: WhatsAppDeepLink) {

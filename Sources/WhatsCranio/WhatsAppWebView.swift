@@ -4,6 +4,8 @@ import WebKit
 
 enum WebAppAction {
     case selectAccount(UUID)
+    case unreadStateChanged(accountID: UUID, total: Int)
+    case incomingMessage(accountID: UUID, sender: String, preview: String, conversationID: String)
     case addAccount
     case openAutomation
     case openSettings
@@ -21,6 +23,23 @@ final class WebActionBridge: NSObject, WKScriptMessageHandler {
         case "selectAccount":
             guard let value = payload["accountID"] as? String, let accountID = UUID(uuidString: value) else { return }
             handler?(.selectAccount(accountID))
+        case "unreadStateChanged":
+            guard let value = payload["accountID"] as? String,
+                  let accountID = UUID(uuidString: value),
+                  let total = payload["total"] as? Int else { return }
+            handler?(.unreadStateChanged(accountID: accountID, total: total))
+        case "incomingMessage":
+            guard let value = payload["accountID"] as? String,
+                  let accountID = UUID(uuidString: value),
+                  let sender = payload["sender"] as? String,
+                  let preview = payload["preview"] as? String,
+                  let conversationID = payload["conversationID"] as? String else { return }
+            handler?(.incomingMessage(
+                accountID: accountID,
+                sender: sender,
+                preview: preview,
+                conversationID: conversationID
+            ))
         case "addAccount": handler?(.addAccount)
         case "openAutomation": handler?(.openAutomation)
         case "openSettings": handler?(.openSettings)
@@ -101,6 +120,100 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     })();
     """
 
+    private static func messageNotificationScript(accountID: UUID) -> String {
+        """
+        (() => {
+          if (location.origin !== "https://web.whatsapp.com" || window.__whatscranioMessageObserver) return;
+          const accountID = "\(accountID.uuidString)";
+          const state = new Map();
+          let initialized = false;
+          let lastTotal = -1;
+          let scanTimer = null;
+          const clean = (value) => (value || "").replace(/\\s+/g, " ").trim();
+          const unreadPattern = /(?:^|\\s)(\\d+)?\\s*(?:mensagens? não lidas?|unread messages?)(?:$|\\s)/i;
+          const visible = (element) => {
+            const rect = element?.getBoundingClientRect?.();
+            return !!rect && rect.width > 0 && rect.height > 0;
+          };
+          const unreadCount = (row) => {
+            const candidates = [row, ...row.querySelectorAll('[aria-label], [title]')];
+            for (const element of candidates) {
+              const label = clean([
+                element.getAttribute?.("aria-label"),
+                element.getAttribute?.("title"),
+                element.textContent
+              ].filter(Boolean).join(" "));
+              const match = unreadPattern.exec(label);
+              if (match) return Math.max(1, Number(match[1] || 1));
+            }
+            return 0;
+          };
+          const rowContent = (row) => {
+            const lines = (row.innerText || "").split(/\\n+/).map(clean).filter(Boolean);
+            const titled = Array.from(row.querySelectorAll('[title]'))
+              .map((element) => clean(element.getAttribute("title")))
+              .filter(Boolean);
+            const isMetadata = (value) =>
+              !value
+              || /^\\d+$/.test(value)
+              || /^\\d{1,2}:\\d{2}$/.test(value)
+              || unreadPattern.test(value)
+              || /^(?:hoje|ontem|today|yesterday|você|you|\\(você\\)|\\(you\\))$/i.test(value);
+            const sender = titled.find((value) => !isMetadata(value))
+              || lines.find((value) => !isMetadata(value))
+              || "WhatsApp";
+            const preview = [...lines].reverse().find((value) =>
+              value !== sender
+              && !isMetadata(value)
+            ) || "";
+            return { sender, preview };
+          };
+          const post = (payload) => window.webkit?.messageHandlers?.whatscranio?.postMessage(payload);
+          const scan = () => {
+            scanTimer = null;
+            const pane = document.querySelector("#pane-side");
+            const rows = pane ? Array.from(pane.querySelectorAll(
+              '[role="listitem"], [role="row"], [data-testid="cell-frame-container"]'
+            )).filter(visible) : [];
+            for (const row of rows) {
+              const unread = unreadCount(row);
+              const { sender, preview } = rowContent(row);
+              const conversationID = clean(sender).toLocaleLowerCase();
+              if (!conversationID) continue;
+              const previous = state.get(conversationID);
+              if (initialized && unread > 0
+                  && (!previous || unread > previous.unread || preview !== previous.preview)) {
+                post({ action: "incomingMessage", accountID, sender, preview, conversationID });
+              }
+              state.set(conversationID, { unread, preview });
+            }
+            const titleMatch = /^\\((\\d+)\\)/.exec(document.title || "");
+            const total = titleMatch
+              ? Number(titleMatch[1])
+              : Array.from(state.values()).reduce((sum, item) => sum + item.unread, 0);
+            if (total !== lastTotal) {
+              lastTotal = total;
+              post({ action: "unreadStateChanged", accountID, total });
+            }
+            initialized = true;
+          };
+          const scheduleScan = () => {
+            clearTimeout(scanTimer);
+            scanTimer = setTimeout(scan, 350);
+          };
+          window.__whatscranioMessageObserver = new MutationObserver(scheduleScan);
+          window.__whatscranioMessageObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ["aria-label", "title"]
+          });
+          scheduleScan();
+        })();
+        """
+    }
+
     init(account: WebAccount) {
         let actionBridge = WebActionBridge()
         let configuration = WKWebViewConfiguration()
@@ -110,6 +223,11 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         configuration.userContentController.add(actionBridge, name: "whatscranio")
         configuration.userContentController.addUserScript(WKUserScript(
             source: Self.dismissUnsupportedNotificationPromptScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: Self.messageNotificationScript(accountID: account.id),
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))

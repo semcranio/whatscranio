@@ -34,6 +34,10 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: model.isLocked)
         .onAppear {
+            DesktopNotificationService.configure()
+            if model.messageNotificationsEnabled {
+                DesktopNotificationService.requestAuthorization()
+            }
             model.startActivityMonitoring()
             model.startDeepLinkHandling()
             model.recordUserActivity()
@@ -45,6 +49,10 @@ struct RootView: View {
         .onChange(of: model.selectedAccountID) { _, _ in synchronizeWebSessions() }
         .onReceive(scheduler) { _ in model.refreshDueSchedules() }
         .onReceive(lockScheduler) { date in model.evaluateAutoLock(at: date) }
+        .onReceive(NotificationCenter.default.publisher(for: .whatscranioOpenNotificationAccount)) { notification in
+            guard let accountID = notification.object as? UUID else { return }
+            model.openAccountFromNotification(accountID)
+        }
         .sheet(isPresented: $model.showingAddAccount) {
             AddAccountView().environmentObject(model)
         }
@@ -91,6 +99,15 @@ struct RootView: View {
             case .selectAccount(let accountID):
                 guard appModel.accounts.contains(where: { $0.id == accountID }) else { return }
                 appModel.selectedAccountID = accountID
+            case .unreadStateChanged(let accountID, let total):
+                appModel.updateUnreadMessages(total, for: accountID)
+            case .incomingMessage(let accountID, let sender, let preview, let conversationID):
+                appModel.handleIncomingMessage(
+                    accountID: accountID,
+                    sender: sender,
+                    preview: preview,
+                    conversationID: conversationID
+                )
             case .addAccount:
                 appModel.showingAddAccount = true
             case .openAutomation:
@@ -355,6 +372,7 @@ struct LockView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var accountBeingEdited: WebAccount?
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var passwordConfirmation = ""
@@ -364,7 +382,11 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Geral") {
+                Toggle("Notificar novas mensagens do WhatsApp", isOn: $model.messageNotificationsEnabled)
                 Toggle("Notificar mensagens agendadas", isOn: $model.notificationsEnabled)
+                Text("O ícone do WhatsCrânio na barra de menus mostra o total de mensagens não lidas de todas as contas.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             Section("Bloqueio") {
                 if model.hasLockPassword {
@@ -411,10 +433,22 @@ struct SettingsView: View {
                 ForEach(model.accounts) { account in
                     HStack {
                         Avatar(initials: initials(for: account), tint: account.tint, size: 26)
-                        Text(account.name)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(account.name)
+                            Text("Cor #\(account.tint.uppercased())")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Spacer()
+                        Button {
+                            accountBeingEdited = account
+                        } label: {
+                            Label("Editar", systemImage: "pencil")
+                        }
+                        .help("Editar nome e cor desta conta")
                         if model.accounts.count > 1 {
                             Button("Remover", role: .destructive) { model.removeAccount(account) }
+                                .help("Remover esta conta e sua sessão local")
                         }
                     }
                 }
@@ -466,7 +500,7 @@ struct SettingsView: View {
                 }
             }
             Section("Notificações") {
-                Text("A preferência acima controla os lembretes nativos dos agendamentos. O aviso de notificações de mensagens e ligações do WhatsApp Web é ocultado porque esse recurso não é exposto pelo navegador incorporado.")
+                Text("O WhatsCrânio observa novas mensagens nas contas carregadas e usa as notificações nativas do macOS. Ao clicar em um alerta, a conta correspondente é aberta. O contador também aparece na barra de menus e no ícone do Dock.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section("Privacidade") {
@@ -476,6 +510,10 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .sheet(item: $accountBeingEdited) { account in
+            EditAccountView(account: account)
+                .environmentObject(model)
+        }
     }
 
     private func setPassword() {
@@ -515,6 +553,93 @@ struct SettingsView: View {
 
     private func initials(for account: WebAccount) -> String {
         account.name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+    }
+}
+
+private struct EditAccountView: View {
+    private static let availableTints = [
+        "1DAA82", "5B8DEF", "E58A3B", "8F6AD7", "D45D79",
+        "21A7D9", "D3A72E", "C05A9D", "637080", "CF4B3E"
+    ]
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var model: AppModel
+    let account: WebAccount
+    @State private var name: String
+    @State private var selectedTint: String
+
+    init(account: WebAccount) {
+        self.account = account
+        _name = State(initialValue: account.name)
+        _selectedTint = State(initialValue: account.tint.uppercased())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 12) {
+                Avatar(initials: initials, tint: selectedTint, size: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Editar conta")
+                        .font(.title2.bold())
+                    Text("A sessão do WhatsApp será preservada.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Nome")
+                    .font(.headline)
+                TextField("Nome da conta", text: $name)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Cor de fundo")
+                    .font(.headline)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 10), count: 5), spacing: 10) {
+                    ForEach(Self.availableTints, id: \.self) { tint in
+                        Button {
+                            selectedTint = tint
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(hex: tint).gradient)
+                                    .frame(width: 30, height: 30)
+                                if selectedTint == tint {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.white)
+                                        .shadow(radius: 1)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Usar a cor #\(tint)")
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancelar") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Salvar") {
+                    if model.updateAccount(account, name: name, tint: selectedTint) {
+                        dismiss()
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 390)
+    }
+
+    private var initials: String {
+        name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
     }
 }
 

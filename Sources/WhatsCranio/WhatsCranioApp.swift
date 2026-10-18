@@ -31,6 +31,57 @@ struct WhatsCranioApp: App {
                 .environmentObject(model)
                 .frame(width: 520, height: 620)
         }
+
+        MenuBarExtra {
+            Button("Abrir WhatsCrânio") {
+                model.openAccountFromNotification(model.selectedAccountID)
+            }
+
+            if model.totalUnreadMessages > 0 {
+                Text("\(model.totalUnreadMessages) \(model.totalUnreadMessages == 1 ? "mensagem não lida" : "mensagens não lidas")")
+                Divider()
+            }
+
+            ForEach(model.accounts) { account in
+                Button {
+                    model.openAccountFromNotification(account.id)
+                } label: {
+                    let unread = model.unreadMessages(for: account.id)
+                    if unread > 0 {
+                        Text("\(account.name) (\(unread))")
+                    } else {
+                        Text(account.name)
+                    }
+                }
+            }
+
+            Divider()
+            Button("Mensagens rápidas e agendamentos") {
+                model.openAccountFromNotification(model.selectedAccountID)
+                model.showingAutomationCenter = true
+            }
+            Button("Configurações") {
+                model.openAccountFromNotification(model.selectedAccountID)
+                model.showingSettings = true
+            }
+            Divider()
+            Button("Encerrar WhatsCrânio") {
+                NSApp.terminate(nil)
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: model.totalUnreadMessages > 0 ? "message.fill" : "message")
+                if model.totalUnreadMessages > 0 {
+                    Text("\(model.totalUnreadMessages)")
+                }
+            }
+            .accessibilityLabel(
+                model.totalUnreadMessages > 0
+                    ? "WhatsCrânio, \(model.totalUnreadMessages) mensagens não lidas"
+                    : "WhatsCrânio"
+            )
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 
@@ -41,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.disableSuddenTermination()
+        DesktopNotificationService.configure()
         NSAppleEventManager.shared().setEventHandler(
             self,
             andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),

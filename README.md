@@ -10,7 +10,10 @@ O WhatsCrânio mantém cada conta em uma sessão WebKit persistente e isolada. A
 
 - múltiplas contas do WhatsApp Web no mesmo aplicativo;
 - sessões, cookies e armazenamento separados por conta;
+- edição do nome e da cor de cada conta sem remover a sessão;
 - abertura de links `whatsapp://` com seleção da conta de destino;
+- notificações nativas de novas mensagens, com nome do contato e prévia;
+- ícone na barra de menus com contador de mensagens não lidas;
 - mensagens rápidas organizadas por categorias e pesquisa;
 - anexos de imagem ou documento com legenda automática;
 - agendamento com confirmação manual ou envio automático;
@@ -113,6 +116,7 @@ Sources/WhatsCranio/
 ├── AppLock.swift          # Chaveiro e política de bloqueio
 ├── AppModel.swift         # Estado, persistência e automações
 ├── AutomationViews.swift  # Mensagens rápidas, agenda e filas
+├── DesktopNotifications.swift # Alertas nativos e barra de menus
 ├── LocalStore.swift       # Armazenamento local dos modelos
 ├── PixDonation.swift      # Página de apoio e payload Pix
 ├── Views.swift            # Interface SwiftUI

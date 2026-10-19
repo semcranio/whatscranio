@@ -3,7 +3,29 @@ import Foundation
 import UserNotifications
 
 extension Notification.Name {
-    static let whatscranioOpenNotificationAccount = Notification.Name("whatscranio.openNotificationAccount")
+    static let whatscranioOpenNotification = Notification.Name("whatscranio.openNotification")
+}
+
+struct DesktopNotificationRoute: Equatable {
+    let accountID: UUID
+    let conversationLabel: String?
+    let conversationID: String?
+
+    init(accountID: UUID, conversationLabel: String? = nil, conversationID: String? = nil) {
+        self.accountID = accountID
+        self.conversationLabel = conversationLabel?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.conversationID = conversationID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    init?(userInfo: [AnyHashable: Any]) {
+        guard let accountIDString = userInfo["accountID"] as? String,
+              let accountID = UUID(uuidString: accountIDString) else { return nil }
+        self.init(
+            accountID: accountID,
+            conversationLabel: userInfo["conversationLabel"] as? String,
+            conversationID: userInfo["conversationID"] as? String
+        )
+    }
 }
 
 final class DesktopNotificationDelegate: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
@@ -22,14 +44,15 @@ final class DesktopNotificationDelegate: NSObject, UNUserNotificationCenterDeleg
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        guard let accountIDString = response.notification.request.content.userInfo["accountID"] as? String,
-              let accountID = UUID(uuidString: accountIDString) else {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let route = DesktopNotificationRoute(userInfo: response.notification.request.content.userInfo) else {
             completionHandler()
             return
         }
         completionHandler()
         Task { @MainActor in
-            NotificationCenter.default.post(name: .whatscranioOpenNotificationAccount, object: accountID)
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .whatscranioOpenNotification, object: route)
         }
     }
 }
@@ -57,7 +80,11 @@ enum DesktopNotificationService {
         content.subtitle = account.name
         content.body = preview.isEmpty ? "Você recebeu uma nova mensagem no WhatsApp." : preview
         content.sound = .default
-        content.userInfo = ["accountID": account.id.uuidString]
+        content.userInfo = [
+            "accountID": account.id.uuidString,
+            "conversationID": conversationID,
+            "conversationLabel": sender
+        ]
         content.threadIdentifier = account.id.uuidString
         content.interruptionLevel = .active
         content.relevanceScore = 1
@@ -70,11 +97,24 @@ enum DesktopNotificationService {
     }
 
     static func deliverTest(account: WebAccount) {
-        deliver(
-            account: account,
-            sender: "Notificação de teste",
-            preview: "As novas mensagens aparecerão aqui com remetente e conteúdo.",
-            conversationID: "whatscranio-notification-test"
+        let content = UNMutableNotificationContent()
+        content.title = "Notificação de teste"
+        content.subtitle = account.name
+        content.body = "As novas mensagens aparecerão aqui com remetente e conteúdo."
+        content.sound = .default
+        content.userInfo = ["accountID": account.id.uuidString]
+        content.threadIdentifier = account.id.uuidString
+        content.interruptionLevel = .active
+        content.relevanceScore = 1
+        let request = UNNotificationRequest(
+            identifier: "message.\(account.id.uuidString).notification-test.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
         )
+        UNUserNotificationCenter.current().add(request)
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

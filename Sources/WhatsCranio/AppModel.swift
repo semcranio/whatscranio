@@ -47,6 +47,7 @@ final class AppModel: ObservableObject {
     private var lastUserActivity = Date()
     private var activityMonitor: Any?
     private var deferredWhatsAppLink: WhatsAppDeepLink?
+    private var deepLinkOpenTask: Task<Void, Never>?
 
     init(lockSecurity: AppLockSecurity = AppLockSecurity()) {
         self.lockSecurity = lockSecurity
@@ -150,6 +151,13 @@ final class AppModel: ObservableObject {
         showingDonation = false
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first(where: { $0.title == "WhatsCrânio" })?.makeKeyAndOrderFront(nil)
+    }
+
+    func openNotification(_ route: DesktopNotificationRoute) {
+        guard let account = accounts.first(where: { $0.id == route.accountID }) else { return }
+        openAccountFromNotification(account.id)
+        guard let conversationTarget = route.conversationLabel ?? route.conversationID else { return }
+        WebSessionPool.shared.session(for: account).activateChat(named: conversationTarget) { _ in }
     }
 
     func startActivityMonitoring() {
@@ -417,9 +425,24 @@ final class AppModel: ObservableObject {
     }
 
     private func openWhatsAppLink(_ link: WhatsAppDeepLink, in account: WebAccount) {
+        deepLinkOpenTask?.cancel()
+        let isSwitchingAccount = selectedAccountID != account.id
         selectedAccountID = account.id
         let session = WebSessionPool.shared.session(for: account)
-        session.openWhatsAppLink(link)
+        if isSwitchingAccount {
+            deepLinkOpenTask = Task { @MainActor [weak self, weak session] in
+                // Let SwiftUI finish dismissing the account picker and make the
+                // selected WebView active before interacting with WhatsApp.
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled,
+                      self?.selectedAccountID == account.id
+                else { return }
+                session?.openWhatsAppLink(link)
+            }
+        } else {
+            session.openWhatsAppLink(link)
+        }
         bringMainWindowForward()
     }
 

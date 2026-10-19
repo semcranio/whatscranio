@@ -94,10 +94,16 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         return "Version/\(safariVersion) Safari/605.1.15"
     }
 
-    private static let dismissUnsupportedNotificationPromptScript = """
+    private static let dismissUnsupportedWebPromptsScript = """
     (() => {
       if (location.origin !== "https://web.whatsapp.com") return;
-      const noticePattern = /(?:notifica(?:ç|c)[õo]es de mensagens e liga(?:ç|c)[õo]es est(?:ã|a)o desativadas|notifications? for messages and calls (?:are )?(?:turned off|disabled))/i;
+      const noticePatterns = [
+        /(?:notifica(?:ç|c)[õo]es de mensagens e liga(?:ç|c)[õo]es est(?:ã|a)o desativadas|notifications? for messages and calls (?:are )?(?:turned off|disabled))/i,
+        /(?:ativ(?:e|ar) a sincroniza(?:ç|c)[ãa]o em segundo plano|turn on background sync|enable background sync)/i
+      ];
+      const activationPattern = /(?:^|\\s)(?:ativar|turn on|enable)(?:\\s|$)/i;
+      const closePattern = /(?:^|\\s)(?:fechar|close|dismiss)(?:\\s|$)/i;
+      const matchesUnsupportedNotice = (value) => noticePatterns.some((pattern) => pattern.test(value || ""));
       const labelFor = (element) => [
         element.getAttribute?.("aria-label"),
         element.getAttribute?.("title"),
@@ -105,30 +111,48 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
       ].filter(Boolean).join(" ").trim();
       const dismiss = () => {
         const notice = Array.from(document.querySelectorAll("div, span, p"))
-          .find((element) => noticePattern.test(element.textContent || ""));
+          .find((element) => matchesUnsupportedNotice(element.textContent));
         if (!notice) return false;
         let container = notice;
         for (let depth = 0; container && depth < 15; depth += 1, container = container.parentElement) {
           const buttons = Array.from(container.querySelectorAll("button, [role='button']"));
-          const hasActivation = buttons.some((button) => /^(?:ativar|turn on|enable)$/i.test(labelFor(button)));
-          const close = buttons.find((button) => /^(?:fechar|close|dismiss)$/i.test(labelFor(button)));
-          if (hasActivation && close) {
-            close.click();
-            return true;
+          const text = labelFor(container);
+          const hasActivation = buttons.some((button) => activationPattern.test(labelFor(button)))
+            || activationPattern.test(text);
+          if (!hasActivation) continue;
+          const rect = container.getBoundingClientRect();
+          if (rect.height <= 0 || rect.height > 240) continue;
+          const close = buttons.find((button) => closePattern.test(labelFor(button)));
+          close?.click();
+          if (container.isConnected) {
+            container.style.setProperty("display", "none", "important");
+            container.setAttribute("aria-hidden", "true");
           }
+          return true;
         }
-        const allButtons = Array.from(document.querySelectorAll("button, [role='button']"));
-        const hasActivation = allButtons.some((button) => /^(?:ativar|turn on|enable)$/i.test(labelFor(button)));
-        const close = allButtons.find((button) => /^(?:fechar|close|dismiss)$/i.test(labelFor(button)));
-        if (hasActivation && close) {
+        const close = Array.from(document.querySelectorAll("button, [role='button']"))
+          .find((button) => closePattern.test(labelFor(button)));
+        if (close) {
           close.click();
+          const banner = close.closest("div");
+          if (banner && matchesUnsupportedNotice(banner.textContent)) {
+            banner.style.setProperty("display", "none", "important");
+            banner.setAttribute("aria-hidden", "true");
+          }
           return true;
         }
         return false;
       };
+      window.__whatscranioDismissUnsupportedWebPrompts = dismiss;
       dismiss();
       const observer = new MutationObserver(() => dismiss());
-      observer.observe(document.documentElement, { childList: true, subtree: true });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ["aria-label", "title"]
+      });
     })();
     """
 
@@ -234,7 +258,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.userContentController.add(actionBridge, name: "whatscranio")
         configuration.userContentController.addUserScript(WKUserScript(
-            source: Self.dismissUnsupportedNotificationPromptScript,
+            source: Self.dismissUnsupportedWebPromptsScript,
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))
@@ -562,14 +586,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             return button;
           };
           const mount = () => {
-            const noticePattern = /(?:notifica(?:ç|c)[õo]es de mensagens e liga(?:ç|c)[õo]es est(?:ã|a)o desativadas|notifications? for messages and calls (?:are )?(?:turned off|disabled))/i;
-            const hasDisabledNotice = Array.from(document.querySelectorAll("div, span, p"))
-              .some((element) => noticePattern.test(element.textContent || ""));
-            if (hasDisabledNotice) {
-              const close = Array.from(document.querySelectorAll("button, [role='button']"))
-                .find((button) => /^(?:fechar|close|dismiss)$/i.test(buttonLabel(button)));
-              close?.click();
-            }
+            window.__whatscranioDismissUnsupportedWebPrompts?.();
             const nativeRail = findRail();
             let fallbackRail = document.getElementById("whatscranio-fallback-rail");
             if (!nativeRail && !fallbackRail) {
@@ -595,18 +612,8 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             const signature = JSON.stringify(window.__whatscranioConfig);
             if (host.dataset.signature !== signature) {
               host.dataset.signature = signature;
-              host.setAttribute("aria-label", "Contas e ferramentas do WhatsCrânio");
+              host.setAttribute("aria-label", "Ferramentas do WhatsCrânio");
               host.replaceChildren();
-              for (const account of window.__whatscranioConfig.accounts) {
-                host.appendChild(createButton({
-                  title: account.name,
-                  text: account.initials || "WA",
-                  tint: `#${account.tint}`,
-                  selected: account.id === window.__whatscranioConfig.selectedAccountID,
-                  action: "selectAccount",
-                  accountID: account.id
-                }));
-              }
           host.appendChild(createButton({ title: "Adicionar conta", icon: icons.add, action: "addAccount" }));
           host.appendChild(createButton({ title: "Mensagens rápidas e agendamentos", icon: icons.automation, action: "openAutomation" }));
           host.appendChild(createButton({ title: "Preferências", icon: icons.settings, action: "openSettings" }));
@@ -752,6 +759,15 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             const style = element ? window.getComputedStyle(element) : null;
             return !!rect && rect.width > 0 && rect.height > 0 && style?.display !== "none" && style?.visibility !== "hidden";
           };
+          const exposed = (element) => {
+            if (!visible(element)) return false;
+            const rect = element.getBoundingClientRect();
+            const topmost = document.elementFromPoint(
+              rect.left + Math.min(rect.width / 2, 24),
+              rect.top + Math.min(rect.height / 2, 24)
+            );
+            return !!topmost && (topmost === element || element.contains(topmost) || topmost.contains(element));
+          };
           const clean = (value) => (value || "").replace(/\\s+/g, " ").trim();
           const ignored = /^(?:dados do perfil|profile details?|contact info|online|offline|digitando|typing|visto por último|last seen|pesquisar|search|mais opções|more options|ligação de vídeo|video call|ligação de voz|voice call)$/i;
           const labelFrom = (container) => {
@@ -795,12 +811,21 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             completion(false)
             return
         }
-        activateChat(named: cleanTarget, attempt: 0, shouldContinue: nil, completion: completion)
+        activateChat(
+            named: cleanTarget,
+            attempt: 0,
+            didFillSearch: false,
+            didOpenNewChat: false,
+            shouldContinue: nil,
+            completion: completion
+        )
     }
 
     private func activateChat(
         named target: String,
         attempt: Int,
+        didFillSearch: Bool,
+        didOpenNewChat: Bool,
         shouldContinue: (() -> Bool)?,
         completion: @escaping (Bool) -> Void
     ) {
@@ -817,6 +842,8 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             completion(false)
             return
         }
+        let didFillSearchLiteral = didFillSearch ? "true" : "false"
+        let didOpenNewChatLiteral = didOpenNewChat ? "true" : "false"
 
         let script = """
         (() => {
@@ -849,6 +876,15 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             const style = element ? window.getComputedStyle(element) : null;
             return !!rect && rect.width > 0 && rect.height > 0 && style?.display !== "none" && style?.visibility !== "hidden";
           };
+          const exposed = (element) => {
+            if (!visible(element)) return false;
+            const rect = element.getBoundingClientRect();
+            const topmost = document.elementFromPoint(
+              rect.left + Math.min(rect.width / 2, 24),
+              rect.top + Math.min(rect.height / 2, 24)
+            );
+            return !!topmost && (topmost === element || element.contains(topmost) || topmost.contains(element));
+          };
           const labelValues = (container) => {
             if (!container) return [];
             const values = [];
@@ -877,12 +913,36 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
           const current = activeLabel();
           if (current && matches(current)) return { action: "active", label: current };
 
-          const chatList = document.querySelector("#pane-side");
-          const rows = Array.from((chatList || document).querySelectorAll('[role="listitem"], [role="row"], [data-testid="cell-frame-container"]'))
-            .filter((element) => visible(element) && (chatList || element.getBoundingClientRect().right < window.innerWidth * 0.45));
+          if (targetDigits.length >= 8 && !\(didOpenNewChatLiteral)) {
+            const newChatIcon = Array.from(document.querySelectorAll(
+              '[data-icon="new-chat-outline"], [data-icon="new-chat"], [data-testid="chat-list-new-chat"]'
+            )).filter(visible).find((icon) => visible(icon.closest('button, [role="button"], [tabindex="0"]')));
+            const newChat = newChatIcon?.closest('button, [role="button"], [tabindex="0"]') || Array.from(document.querySelectorAll('button, [role="button"], [tabindex="0"], [aria-label], [title]'))
+              .filter(visible)
+              .find((element) => [
+                element.getAttribute("aria-label"),
+                element.getAttribute("title"),
+                element.innerText
+              ].filter(Boolean).map(clean).some((label) => /^(?:nova conversa|new chat)$/i.test(label)));
+            if (newChat) {
+              newChat.click();
+              return { action: "open-new-chat" };
+            }
+          }
+
+          const rows = Array.from(document.querySelectorAll('[role="listitem"], [role="row"], [data-testid="cell-frame-container"]'))
+            .filter((element) => {
+              if (!exposed(element)) return false;
+              const rect = element.getBoundingClientRect();
+              return rect.right <= window.innerWidth * 0.5;
+            });
           const row = rows.find((candidate) => {
             if (labelValues(candidate).some(matches)) return true;
-            return clean(candidate.innerText).split("\\n").some(matches);
+            const rowText = clean(candidate.innerText);
+            if (targetDigits.length < 8 && normalized(rowText).startsWith(normalized(target) + " ")) {
+              return true;
+            }
+            return (candidate.innerText || "").split(/\\n+/).map(clean).some(matches);
           });
           if (row) {
             const clickable = row.closest('[role="listitem"], [role="row"]') || row;
@@ -890,27 +950,79 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             return { action: "select", x: rect.left + rect.width / 2, y: rect.top + Math.min(rect.height / 2, 36) };
           }
 
-          const search = Array.from(document.querySelectorAll('[contenteditable="true"], input'))
-            .filter(visible)
-            .find((element) => /(?:pesquisar|search)/i.test([
+          const searches = Array.from(document.querySelectorAll('[contenteditable="true"], input'))
+            .filter(exposed)
+            .filter((element) => /(?:pesquisar|search)/i.test([
               element.getAttribute("aria-label"),
               element.getAttribute("aria-placeholder"),
               element.getAttribute("placeholder"),
               element.getAttribute("data-placeholder")
             ].filter(Boolean).join(" ")));
+          const search = (\(didOpenNewChatLiteral)
+            ? searches.find((element) => /(?:nome|name|número|number|usuário|username)/i.test([
+                element.getAttribute("aria-label"),
+                element.getAttribute("aria-placeholder"),
+                element.getAttribute("placeholder"),
+                element.getAttribute("data-placeholder")
+              ].filter(Boolean).join(" ")))
+            : null) || searches[0];
           if (!search) return { action: "waiting" };
           const searchValue = clean(search.value || search.innerText || search.textContent);
           if (!matches(searchValue)) {
             search.focus();
-            return { action: "fill-search" };
+            if (search.isContentEditable) {
+              const selection = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(search);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.execCommand("insertText", false, target);
+            } else {
+              const prototype = search instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+              const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+              setter?.call(search, target);
+              search.dispatchEvent(new InputEvent("input", {
+                bubbles: true,
+                inputType: "insertText",
+                data: target
+              }));
+            }
+            return { action: "search-filled" };
+          }
+          if (targetDigits.length >= 8 && \(didOpenNewChatLiteral) && \(didFillSearchLiteral) && \(attempt) >= 2) {
+            const searchRect = search.getBoundingClientRect();
+            const ignored = /^(?:voltar|back|número de telefone|phone number|novo grupo|new group|novo contato|new contact|end icon button)$/i;
+            const result = Array.from(document.querySelectorAll('button, [role="button"]'))
+              .filter((element) => {
+                if (!exposed(element)) return false;
+                const rect = element.getBoundingClientRect();
+                if (rect.top < searchRect.bottom - 2 || rect.right > window.innerWidth * 0.5 || rect.height < 28) return false;
+                const label = clean([
+                  element.getAttribute("aria-label"),
+                  element.getAttribute("title"),
+                  element.innerText
+                ].filter(Boolean).join(" "));
+                return label && !ignored.test(label);
+              })[0];
+            if (result) {
+              result.focus();
+              return { action: "select-phone-result" };
+            }
+            if (\(attempt) >= 12) return { action: "failed" };
           }
           return { action: "waiting" };
         })();
         """
 
         let webSession: WebSession = self
-        webView.evaluateJavaScript(script) { result, _ in
+        webView.evaluateJavaScript(script) { result, error in
             Task { @MainActor in
+                if error != nil {
+                    completion(false)
+                    return
+                }
                 let payload = result as? [String: Any]
                 switch payload?["action"] as? String {
                 case "active":
@@ -920,12 +1032,40 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
                     if let x = payload?["x"] as? Double, let y = payload?["y"] as? Double {
                         webSession.performTrustedWebClick(x: x, y: y)
                     }
-                case "fill-search":
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(target, forType: .string)
-                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: webSession.webView)
-                    NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: webSession.webView)
+                case "open-new-chat":
+                    try? await Task.sleep(for: .milliseconds(300))
+                    webSession.activateChat(
+                        named: target,
+                        attempt: 0,
+                        didFillSearch: false,
+                        didOpenNewChat: true,
+                        shouldContinue: shouldContinue,
+                        completion: completion
+                    )
+                    return
+                case "select-phone-result":
+                    webSession.performTrustedWebReturn()
+                    try? await Task.sleep(for: .milliseconds(450))
+                    webSession.activateChat(
+                        named: target,
+                        attempt: attempt + 1,
+                        didFillSearch: true,
+                        didOpenNewChat: true,
+                        shouldContinue: shouldContinue,
+                        completion: completion
+                    )
+                    return
+                case "failed":
+                    completion(false)
+                    return
+                case "search-filled":
+                    guard !didFillSearch else {
+                        if attempt >= 6 {
+                            completion(false)
+                            return
+                        }
+                        break
+                    }
                 default:
                     break
                 }
@@ -933,6 +1073,8 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
                 webSession.activateChat(
                     named: target,
                     attempt: attempt + 1,
+                    didFillSearch: didFillSearch || (payload?["action"] as? String == "search-filled"),
+                    didOpenNewChat: didOpenNewChat,
                     shouldContinue: shouldContinue,
                     completion: completion
                 )
@@ -1146,6 +1288,37 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         // testing down to WKWebView's internal content view. Calling
         // `mouseDown` directly on WKWebView stops at the wrapper view on
         // current WebKit builds, which leaves WhatsApp's send button untouched.
+        window.sendEvent(down)
+        window.sendEvent(up)
+    }
+
+    private func performTrustedWebReturn() {
+        guard let window = webView.window else { return }
+        window.makeFirstResponder(webView)
+        let timestamp = ProcessInfo.processInfo.systemUptime
+        guard let down = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: timestamp,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ), let up = NSEvent.keyEvent(
+            with: .keyUp,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: timestamp + 0.02,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ) else { return }
         window.sendEvent(down)
         window.sendEvent(up)
     }

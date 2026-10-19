@@ -49,9 +49,9 @@ struct RootView: View {
         .onChange(of: model.selectedAccountID) { _, _ in synchronizeWebSessions() }
         .onReceive(scheduler) { _ in model.refreshDueSchedules() }
         .onReceive(lockScheduler) { date in model.evaluateAutoLock(at: date) }
-        .onReceive(NotificationCenter.default.publisher(for: .whatscranioOpenNotificationAccount)) { notification in
-            guard let accountID = notification.object as? UUID else { return }
-            model.openAccountFromNotification(accountID)
+        .onReceive(NotificationCenter.default.publisher(for: .whatscranioOpenNotification)) { notification in
+            guard let route = notification.object as? DesktopNotificationRoute else { return }
+            model.openNotification(route)
         }
         .sheet(isPresented: $model.showingAddAccount) {
             AddAccountView().environmentObject(model)
@@ -263,14 +263,220 @@ struct IntegratedWebAccountsView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        ZStack {
-            ForEach(model.accounts) { account in
-                WhatsAppWebContainer(account: account)
-                    .opacity(model.selectedAccountID == account.id ? 1 : 0)
-                    .allowsHitTesting(model.selectedAccountID == account.id)
-                    .accessibilityHidden(model.selectedAccountID != account.id)
+        VStack(spacing: 0) {
+            AccountTabsView(activeAccountColor: activeAccountColor)
+
+            ZStack {
+                ForEach(model.accounts) { account in
+                    WhatsAppWebContainer(account: account)
+                        .opacity(model.selectedAccountID == account.id ? 1 : 0)
+                        .allowsHitTesting(model.selectedAccountID == account.id)
+                        .accessibilityHidden(model.selectedAccountID != account.id)
+                }
+            }
+            .overlay {
+                ZStack {
+                    AccountFrameShape()
+                        .stroke(activeAccountColor.opacity(0.22), lineWidth: 7)
+                        .blur(radius: 4)
+
+                    AccountFrameShape()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    activeAccountColor.opacity(0.95),
+                                    activeAccountColor.opacity(0.38),
+                                    activeAccountColor.opacity(0.58)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.5
+                        )
+                }
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, .white],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 24)
+
+                        Color.white
+                    }
+                }
+                .padding(3)
+                .allowsHitTesting(false)
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: model.selectedAccountID)
+    }
+
+    private var activeAccountColor: Color {
+        Color(hex: model.accounts.first(where: { $0.id == model.selectedAccountID })?.tint ?? "1DAA82")
+    }
+}
+
+private struct AccountTabsView: View {
+    @EnvironmentObject private var model: AppModel
+    let activeAccountColor: Color
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .bottom, spacing: 7) {
+                ForEach(model.accounts) { account in
+                    accountTab(account)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 7)
+        }
+        .coordinateSpace(name: "whatscranio-account-tabs")
+        .scrollIndicators(.hidden)
+        .scrollClipDisabled()
+        .background(.regularMaterial)
+        .overlayPreferenceValue(ActiveAccountTabBoundsKey.self) { activeBounds in
+            GeometryReader { geometry in
+                if let activeBounds {
+                    let bounds = geometry[activeBounds]
+                    LinearGradient(
+                        colors: [
+                            activeAccountColor.opacity(0.9),
+                            activeAccountColor.opacity(0.28),
+                            .clear
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: max(geometry.size.width - bounds.minX, 0), height: 1.5)
+                    .position(
+                        x: bounds.minX + max(geometry.size.width - bounds.minX, 0) / 2,
+                        y: geometry.size.height - 0.75
+                    )
+                    .shadow(color: activeAccountColor.opacity(0.35), radius: 3, y: 1)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Contas do WhatsCrânio")
+    }
+
+    private func accountTab(_ account: WebAccount) -> some View {
+        let isSelected = model.selectedAccountID == account.id
+        let tint = Color(hex: account.tint)
+        let unread = model.unreadMessages(for: account.id)
+
+        return Button {
+            model.selectedAccountID = account.id
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(isSelected ? Color.white : tint)
+                    .frame(width: 8, height: 8)
+
+                Text(account.name)
+                    .font(.system(size: 13, weight: isSelected ? .bold : .semibold))
+                    .lineLimit(1)
+
+                if unread > 0 {
+                    Text(unread > 99 ? "99+" : "\(unread)")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(isSelected ? tint : .white)
+                        .background(isSelected ? Color.white : tint, in: Capsule())
+                }
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                }
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .padding(.horizontal, 12)
+            .frame(height: isSelected ? 38 : 30)
+            .background {
+                if isSelected {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 10,
+                        bottomLeadingRadius: 2,
+                        bottomTrailingRadius: 2,
+                        topTrailingRadius: 10,
+                        style: .continuous
+                    )
+                    .fill(
+                        LinearGradient(
+                            colors: [tint.opacity(0.92), tint],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                } else {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(tint.opacity(0.14))
+                }
+            }
+            .overlay {
+                if isSelected {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 10,
+                        bottomLeadingRadius: 2,
+                        bottomTrailingRadius: 2,
+                        topTrailingRadius: 10,
+                        style: .continuous
+                    )
+                    .stroke(tint.opacity(0.95), lineWidth: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(tint.opacity(0.48), lineWidth: 1)
+                }
+            }
+            .shadow(color: isSelected ? tint.opacity(0.32) : .clear, radius: 7, y: 2)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, isSelected ? 0 : 4)
+        .zIndex(isSelected ? 1 : 0)
+        .anchorPreference(key: ActiveAccountTabBoundsKey.self, value: .bounds) { bounds in
+            isSelected ? bounds : nil
+        }
+        .help(isSelected ? "Conta ativa: \(account.name)" : "Abrir a conta \(account.name)")
+        .accessibilityLabel(account.name)
+        .accessibilityValue(isSelected ? "Conta ativa" : "Conta inativa")
+    }
+}
+
+private struct AccountFrameShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let radius: CGFloat = 11
+        let minX = rect.minX
+        let maxX = rect.maxX
+        let minY = rect.minY
+        let maxY = rect.maxY
+
+        var path = Path()
+        path.move(to: CGPoint(x: maxX, y: minY))
+        path.addLine(to: CGPoint(x: maxX, y: maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: maxX - radius, y: maxY),
+            control: CGPoint(x: maxX, y: maxY)
+        )
+        path.addLine(to: CGPoint(x: minX + radius, y: maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: minX, y: maxY - radius),
+            control: CGPoint(x: minX, y: maxY)
+        )
+        path.addLine(to: CGPoint(x: minX, y: minY))
+        return path
+    }
+}
+
+private struct ActiveAccountTabBoundsKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
     }
 }
 

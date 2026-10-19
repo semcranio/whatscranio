@@ -12,6 +12,7 @@ O WhatsCrânio mantém cada conta em uma sessão WebKit persistente e isolada. A
 - sessões, cookies e armazenamento separados por conta;
 - edição do nome e da cor de cada conta sem remover a sessão;
 - abertura de links `whatsapp://` com seleção da conta de destino;
+- abertura de links recebidos nos chats no navegador padrão;
 - notificações nativas de novas mensagens, com nome do contato e prévia;
 - ícone na barra de menus com contador de mensagens não lidas;
 - mensagens rápidas organizadas por categorias e pesquisa;

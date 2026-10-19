@@ -13,6 +13,18 @@ enum WebAppAction {
     case lock
 }
 
+enum WebLinkRouting {
+    private static let externalSchemes = Set(["http", "https", "mailto", "tel"])
+
+    static func shouldOpenExternally(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), externalSchemes.contains(scheme) else { return false }
+        if scheme == "http" || scheme == "https" {
+            return url.host?.lowercased() != "web.whatsapp.com"
+        }
+        return true
+    }
+}
+
 @MainActor
 final class WebActionBridge: NSObject, WKScriptMessageHandler {
     var handler: ((WebAppAction) -> Void)?
@@ -467,6 +479,24 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
             lock: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
           };
 
+          const updateFallbackContrast = (rail) => {
+            const channels = getComputedStyle(rail).backgroundColor
+              .match(/[0-9.]+/g)?.slice(0, 3).map(Number);
+            if (!channels || channels.length !== 3) {
+              rail.style.setProperty("--whatscranio-control-color", "#3b4a54");
+              return;
+            }
+            const linear = channels.map((channel) => {
+              const value = channel / 255;
+              return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+            });
+            const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+            rail.style.setProperty(
+              "--whatscranio-control-color",
+              luminance > 0.4 ? "#3b4a54" : "#d1d7db"
+            );
+          };
+
           const createButton = ({ title, text, icon, tint, selected, action, accountID }) => {
             const button = document.createElement("button");
             button.type = "button";
@@ -481,7 +511,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
               "width:40px", "height:40px", "min-height:40px", "border:0", "border-radius:12px",
               "display:flex", "align-items:center", "justify-content:center", "cursor:pointer",
               "font:600 13px -apple-system,BlinkMacSystemFont,sans-serif",
-              tint ? "color:white" : "color:var(--panel-header-icon,var(--icon,#54656f))",
+              tint ? "color:white" : "color:var(--whatscranio-control-color,var(--panel-header-icon,var(--icon,#54656f)))",
               "position:relative", "overflow:visible", "flex:0 0 auto",
               `background:${tint ? `#${tint.replace(/^#/, "")}` : "transparent"}`,
               selected ? "box-shadow:0 0 0 3px #21c063" : "box-shadow:none"
@@ -548,6 +578,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
               fallbackRail.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:64px;z-index:2147483646;background:var(--panel-header-background,var(--background-default,#f0f2f5));display:flex;flex-direction:column;align-items:center;overflow-y:auto;overflow-x:hidden";
               document.body.appendChild(fallbackRail);
             }
+            if (!nativeRail && fallbackRail) updateFallbackContrast(fallbackRail);
             const rail = nativeRail || fallbackRail;
             if (!rail) return false;
             let host = document.getElementById("whatscranio-integrated-controls");
@@ -643,6 +674,36 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         if let integratedNavigationScript {
             webView.evaluateJavaScript(integratedNavigationScript)
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        guard navigationAction.navigationType == .linkActivated,
+              let url = navigationAction.request.url,
+              WebLinkRouting.shouldOpenExternally(url) else {
+            decisionHandler(.allow)
+            return
+        }
+        NSWorkspace.shared.open(url)
+        decisionHandler(.cancel)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        guard navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
+        if WebLinkRouting.shouldOpenExternally(url) {
+            NSWorkspace.shared.open(url)
+        } else if url.host?.lowercased() == "web.whatsapp.com" {
+            webView.load(navigationAction.request)
+        }
+        return nil
     }
 
     @discardableResult

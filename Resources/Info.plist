@@ -10,8 +10,8 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>WhatsCrânio</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.6.0</string>
-    <key>CFBundleVersion</key><string>10</string>
+    <key>CFBundleShortVersionString</key><string>0.6.1</string>
+    <key>CFBundleVersion</key><string>11</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -23,6 +23,7 @@
     </array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSCameraUsageDescription</key><string>O WhatsCrânio usa a câmera somente quando você inicia uma chamada de vídeo ou captura mídia pelo WhatsApp.</string>
     <key>NSMicrophoneUsageDescription</key><string>O WhatsCrânio usa o microfone somente quando você escolhe gravar uma mensagem de áudio.</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict>

@@ -384,8 +384,9 @@ private struct AccountTabsView: View {
                         .font(.caption2.bold())
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .foregroundStyle(isSelected ? tint : .white)
-                        .background(isSelected ? Color.white : tint, in: Capsule())
+                        .foregroundStyle(.white)
+                        .background(Color.red, in: Capsule())
+                        .shadow(color: Color.red.opacity(0.28), radius: 2, y: 1)
                 }
 
                 if isSelected {

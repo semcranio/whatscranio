@@ -82,6 +82,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var preparedMessageAutoSend = false
     private var preparedMessageKind: PreparedMessageKind = .text
     private var preparedMessageCompletion: ((Bool) -> Void)?
+    private var preparedTextPasteIssued = false
     private var preparedSendClickIssued = false
     private var activeQueueRunID: UUID?
     private var activeQueueCompletion: ((MessageQueueResult) -> Void)?
@@ -727,6 +728,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         preparedMessageMacroID = nil
         preparedMessageAutoSend = false
         preparedMessageCompletion = nil
+        preparedTextPasteIssued = false
         preparedSendClickIssued = false
         return queuedAttachmentURLs.count
     }
@@ -736,6 +738,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         preparedMessageMacroID = macroID
         preparedMessageAutoSend = autoSend
         preparedMessageCompletion = completion
+        preparedTextPasteIssued = false
         preparedSendClickIssued = false
         webView.window?.makeFirstResponder(webView)
         guard !queuedAttachmentURLs.isEmpty else {
@@ -1119,6 +1122,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         queuedAttachmentCaption = nil
         preparedMessageAutoSend = false
         preparedMessageCompletion = nil
+        preparedTextPasteIssued = false
         preparedSendClickIssued = false
         if notify {
             queueCompletion?(.cancelled)
@@ -1454,9 +1458,11 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
               let textLiteral = String(data: textData, encoding: .utf8)
         else { return }
 
+        let pasteIssued = preparedTextPasteIssued ? "true" : "false"
         let script = """
         (() => {
           const text = \(textLiteral);
+          const pasteIssued = \(pasteIssued);
           const semantics = (element) => [
             element.getAttribute("aria-label"),
             element.getAttribute("aria-placeholder"),
@@ -1474,6 +1480,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
               && !/(?:legenda|caption)/i.test(semantics(element)));
           if (!target) return "waiting";
           const current = (target.innerText || target.textContent || "").trim();
+          if (pasteIssued) return current ? "confirmed" : "waiting";
           if (current === text.trim()) return "confirmed";
           if (current) return "occupied";
           target.focus();
@@ -1494,6 +1501,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
                     pasteboard.setString(text, forType: .string)
+                    webSession.preparedTextPasteIssued = true
                     NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: webSession.webView)
                     try? await Task.sleep(for: .milliseconds(350))
                     webSession.insertChatText(text, macroID: macroID, attempt: attempt + 1)
@@ -1614,6 +1622,7 @@ final class WebSession: NSObject, WKNavigationDelegate, WKUIDelegate {
         preparedMessageMacroID = nil
         preparedMessageAutoSend = false
         preparedMessageCompletion = nil
+        preparedTextPasteIssued = false
         preparedSendClickIssued = false
         completion?(success)
     }
